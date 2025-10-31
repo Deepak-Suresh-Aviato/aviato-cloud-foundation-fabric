@@ -1,0 +1,15 @@
+steps:
+- name: 'hashicorp/terraform:latest'
+  id: 'Terraform init'
+  args: ['init']
+  dir: 'fast/stages/0-org-setup'
+
+- name: 'hashicorp/terraform:latest'
+  id: 'Terraform plan'
+  args: ['plan', '-out=tfplan']
+  dir: 'fast/stages/0-org-setup'
+
+- name: 'hashicorp/terraform:latest'
+  id: 'Terraform apply'
+  args: ['apply', '-auto-approve', 'tfplan']
+  dir: 'fast/stages/0-org-setup'
