@@ -1,15 +1,77 @@
+# This Cloud Build pipeline is triggered by a GitHub Pull Request.
+# It is designed for multi-environment deployments by using substitution variables.
+# It runs a Terraform validate, plan, posts the plan to the PR, waits for manual approval,
+# and then applies the plan.
+
+# Default substitution variables. These can be overridden in the Cloud Build trigger.
+substitutions:
+  _TF_DIR: fast/stages/0-org-setup
+
 steps:
+# 1. Initialize Terraform
 - name: 'hashicorp/terraform:latest'
   id: 'Terraform init'
-  args: ['init']
-  dir: 'fast/stages/0-org-setup'
+  entrypoint: 'sh'
+  args: ['-c', 'terraform init']
+  dir: '${_TF_DIR}'
 
+# 2. Statically analyze the configuration for syntax errors.
+- name: 'hashicorp/terraform:latest'
+  id: 'Terraform validate'
+  entrypoint: 'sh'
+  args: ['-c', 'terraform validate']
+  dir: '${_TF_DIR}'
+
+# 3. Generate the Terraform plan.
 - name: 'hashicorp/terraform:latest'
   id: 'Terraform plan'
-  args: ['plan', '-out=tfplan']
-  dir: 'fast/stages/0-org-setup'
+  entrypoint: 'sh'
+  args:
+  - '-c'
+  - |
+    terraform plan -out=tfplan
+    terraform show -no-color tfplan > tfplan.txt
+  dir: '${_TF_DIR}'
 
+# 4. Make the PR comment script executable.
+- name: 'gcr.io/cloud-builders/gcloud'
+  id: 'Make script executable'
+  entrypoint: 'sh'
+  args: ['-c', 'chmod +x scripts/post-pr-comment.sh']
+
+# 5. Post the plan to the GitHub PR for review.
+# This step requires a secret named 'github-token' to be created in Secret Manager.
+- name: 'gcr.io/cloud-builders/gcloud'
+  id: 'Post plan to PR'
+  entrypoint: 'sh'
+  args:
+  - '-c'
+  - |
+    export TF_PLAN=$(cat ${_TF_DIR}/tfplan.txt)
+    ./scripts/post-pr-comment.sh
+  secretEnv: ['GITHUB_TOKEN']
+  waitFor: ['Terraform plan']
+
+# 6. Manual approval step. The pipeline will pause here and wait for a user with
+# the 'Cloud Build Approver' role to approve it in the GCP Console.
+- name: "gcr.io/cloud-builders/gcloud"
+  id: "Manual approval"
+  entrypoint: "bash"
+  args: ["-c", "echo 'Waiting for manual approval before applying...'"]
+  waitFor: ['Post plan to PR']
+  timeout: 3600s # 1 hour timeout for the approval
+
+# 7. Apply the Terraform plan.
 - name: 'hashicorp/terraform:latest'
   id: 'Terraform apply'
-  args: ['apply', '-auto-approve', 'tfplan']
-  dir: 'fast/stages/0-org-setup'
+  entrypoint: 'sh'
+  args: ['-c', 'terraform apply -auto-approve tfplan']
+  dir: '${_TF_DIR}'
+
+# Configuration for Cloud Build to access the GitHub token from Secret Manager.
+# IMPORTANT: You MUST replace 'YOUR_GCP_PROJECT_ID_HERE' with the actual GCP Project ID
+# where the 'github-token' secret is stored.
+availableSecrets:
+  secretManager:
+  - versionName: projects/YOUR_GCP_PROJECT_ID_HERE/secrets/github-token/versions/latest
+    env: 'GITHUB_TOKEN'
