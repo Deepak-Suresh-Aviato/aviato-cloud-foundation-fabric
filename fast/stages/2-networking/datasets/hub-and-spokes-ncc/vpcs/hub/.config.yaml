@@ -10,7 +10,7 @@ delete_default_routes_on_create: false
 routers:
   vpn-router:
     region: $locations:primary
-    asn: 64514
+    asn: 64512
 routes:
   gateway:
     # The configuration above is purely illustrative. Adjust as needed.

@@ -19,3 +19,4 @@ project_id: $project_ids:prod-sec-core-0
 keys:
   compute: {}
   storage: {}
+  gke: {}

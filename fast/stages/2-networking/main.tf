@@ -21,6 +21,10 @@ locals {
   _defaults = yamldecode(file(local.paths.defaults))
   ctx = merge(var.context, {
     cidr_ranges_sets = try(local._defaults.context.cidr_ranges_sets, {})
+    secret_manager_secrets = merge(
+      try(var.context.secret_manager_secrets, {}),
+      try(local._defaults.context.secret_manager_secrets, {})
+    )
     folder_ids = merge(
       var.folder_ids, var.context.folder_ids
     )
