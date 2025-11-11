@@ -1,0 +1,31 @@
+# This Cloud Build pipeline is triggered by a push to a branch (e.g., a merge).
+# It downloads a plan artifact from a GCS bucket and runs `terraform apply`.
+# This pipeline is designed to be used with the corresponding `cloudbuild-plan.yaml`.
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+# 1. Initialize Terraform
+- name: 'hashicorp/terraform:latest'
+  id: 'Terraform init'
+  entrypoint: 'sh'
+  args: ['-c', 'terraform init']
+
+# 2. Download the plan file from the GCS bucket.
+# The bucket name is passed in as a substitution variable.
+- name: 'gcr.io/cloud-builders/gsutil'
+  id: 'Download plan from GCS'
+  args: ['cp', 'gs://${_PLAN_BUCKET}/${_BRANCH_NAME}_tfplan', '.']
+
+# 3. Apply the Terraform plan.
+- name: 'hashicorp/terraform:latest'
+  id: 'Terraform apply'
+  entrypoint: 'sh'
+  args: ['-c', 'terraform apply -auto-approve ${_BRANCH_NAME}_tfplan']
+  waitFor: ['Download plan from GCS']
+
+# Substitution variables that should be defined in the Cloud Build trigger.
+substitutions:
+  _PLAN_BUCKET: '' # Must be specified in the trigger
+  _BRANCH_NAME: 'development' # Default, should be overridden by the trigger

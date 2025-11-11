@@ -19,8 +19,8 @@ peer_gateways:
     external:
       redundancy_type: TWO_IPS_REDUNDANCY
       interfaces:
-        - 2.2.2.2 # Azure Instance 1
-        - 2.2.2.3 # Azure Instance 2
+        - $var:azure_peer_ip_0
+        - $var:azure_peer_ip_1
 router_config:
   create: false
   name: $routers:hub/vpn-router

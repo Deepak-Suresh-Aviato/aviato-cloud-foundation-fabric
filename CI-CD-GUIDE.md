@@ -1,67 +1,90 @@
-# CI/CD Guide for a Distributed, Multi-Environment FAST Architecture
+# CI/CD Guide for a GitOps-Driven FAST Architecture
 
-This document outlines the CI/CD strategy for managing your Google Cloud Foundation, which is composed of multiple FAST stages. This architecture uses a distributed pipeline model, where each FAST stage has its own independent CI/CD pipeline, enabling modular, parallel, and environment-aware deployments.
+This document outlines the CI/CD strategy for managing your Google Cloud Foundation using a best-practice, two-trigger GitOps workflow. This model uses separate pipelines for planning (`terraform plan`) and applying (`terraform apply`), triggered by different Git events to ensure a safe and reviewable deployment process.
 
-## CI/CD Architecture
+## CI/CD Architecture: Plan on PR, Apply on Merge
 
-Instead of a single, monolithic pipeline, this repository uses a distributed architecture where each FAST stage (`0-org-setup`, `1-vpcsc`, `2-networking`, `2-security`, etc.) contains its own `cloudbuild.yaml` file.
+This repository uses a distributed, two-trigger architecture where each FAST stage (`0-org-setup`, `1-vpcsc`, etc.) has two corresponding Cloud Build pipelines:
 
-This approach has several advantages:
-*   **Modularity**: Each stage can be deployed and managed independently.
-*   **Parallelism**: Changes to different stages can be planned and reviewed in parallel.
-*   **Scalability**: It's easy to add new FAST stages without modifying a central pipeline.
-*   **Clarity**: The CI/CD logic for a stage is located within the stage's own directory.
+1.  **Plan Pipeline (`cloudbuild-plan.yaml`):**
+    *   **Trigger:** Runs when a **Pull Request** is opened or updated.
+    *   **Action:** Executes `terraform plan` to generate a plan file.
+    *   **Output:** Saves the plan file as an artifact in a central Google Cloud Storage (GCS) bucket and posts a status check (Success/Failure) back to the GitHub PR.
 
-## Initial Bootstrap Sequence (First-Time Deployment)
+2.  **Apply Pipeline (`cloudbuild-apply.yaml`):**
+    *   **Trigger:** Runs when a commit is **pushed to a main branch** (i.e., when a PR is merged).
+    *   **Action:** Downloads the plan artifact from the GCS bucket.
+    *   **Output:** Executes `terraform apply` using the approved plan file.
 
-Due to dependencies between the stages, you must perform a one-time manual bootstrap to deploy the stages in the correct order for the first time.
+This workflow ensures that the exact plan reviewed in the Pull Request is the one that gets applied, with the PR approval and merge serving as the explicit sign-off for deployment.
 
-**IMPORTANT**: The `0-org-setup` stage creates the `iac-0` project, which is where the Cloud Build service account will be granted permissions and where the `github-token` secret must be stored. You must run this stage first to enable the CI/CD automation for the other stages.
+## Initial Setup: Create the Plan Artifact Bucket
 
-The correct bootstrap order is:
-1.  **`0-org-setup`**: Deploys the core organization structure and the `iac-0` project.
-2.  **`0-secrets`**: Creates the secrets in Secret Manager.
-3.  **`1-vpcsc`**: Establishes the VPC Service Controls perimeter.
-4.  **`2-networking`**: Deploys the core networking infrastructure.
-5.  **`2-security`**: Deploys the centralized security services.
+Before you can use this CI/CD system, you must create a Google Cloud Storage bucket to store the Terraform plan artifacts.
 
-You will need to manually trigger the Cloud Build pipeline for each of these stages, in order, from the Google Cloud Console to provision your first environment.
-
-## Environment and Branching Strategy
-
-Each environment is tied to a specific Git branch:
-
-*   **`development` branch**: Deploys to the `development` GCP environment.
-*   **`non-production` branch**: Deploys to the `non-production` GCP environment.
-*   **`main` branch**: Deploys to the `production` GCP environment.
+1.  **Choose a globally unique name** for your bucket (e.g., `avlab-gcp-tf-plans`).
+2.  **Create the bucket** in the Google Cloud Console or using the `gcloud` CLI:
+    ```sh
+    gcloud storage buckets create gs://your-unique-bucket-name --project=your-iac-0-project-id
+    ```
+3.  **Enable Object Versioning** on the bucket. This is a critical safety measure to prevent plans from being overwritten and to keep a history.
+    ```sh
+    gcloud storage buckets update gs://your-unique-bucket-name --versioning
+    ```
 
 ## Cloud Build Trigger Configuration
 
-You will need to create a separate Cloud Build trigger for each FAST stage and for each environment. For example, for the `development` environment, you will have five triggers:
+You will need to create **two triggers for each FAST stage and for each environment**. For a `development` environment, you would have:
 
-*   `deploy-dev-0-org-setup`
-*   `deploy-dev-0-secrets`
-*   `deploy-dev-1-vpcsc`
-*   `deploy-dev-2-networking`
-*   `deploy-dev-2-security`
+*   `plan-dev-0-org-setup` and `apply-dev-0-org-setup`
+*   `plan-dev-0-secrets` and `apply-dev-0-secrets`
+*   ...and so on for all five stages.
 
-### Recommended Trigger Configuration
+---
 
-*   **Name**: A descriptive name (e.g., `deploy-dev-0-org-setup`).
-*   **Event**: "Push to a branch".
-*   **Source**:
-    *   **Repository**: Your `aviato-cloud-foundation-fabric` repository.
-    *   **Branch**: The name of the environment-specific branch (e.g., `^development$`).
-*   **Configuration**:
-    *   **Type**: "Cloud Build configuration file (yaml or json)".
-    *   **Location**: The path to the stage-specific `cloudbuild.yaml` file (e.g., `fast/stages/0-org-setup/cloudbuild.yaml`).
-*   **Substitution variables**:
-    *   `_TF_VARS_FILE`: The environment-specific `.tfvars` file (e.g., `gcp-development.tfvars`).
-    *   `_GITHUB_TOKEN_SECRET_VERSION`: The full version string for your GitHub token secret in Secret Manager (e.g., `projects/your-iac-0-project-id/secrets/github-token/versions/latest`).
+### **Trigger 1: The "Plan" Trigger**
 
-## Pull Request and Deployment Workflow
+*   **Name:** A descriptive name (e.g., `plan-dev-0-org-setup`).
+*   **Event:** "Pull request".
+*   **Source:**
+    *   **Repository:** Your `aviato-cloud-foundation-fabric` repository.
+    *   **Base branch:** The branch the PR is targeting (e.g., `^development$`).
+    *   **Comment control:** (Optional but recommended) "Required for new contributors only".
+*   **Configuration:**
+    *   **Type:** "Cloud Build configuration file (yaml or json)".
+    *   **Location:** The path to the stage-specific `cloudbuild-plan.yaml` file (e.g., `fast/stages/0-org-setup/cloudbuild-plan.yaml`).
+*   **Substitution variables:**
+    *   `_TF_VARS_FILE`: `gcp-development.tfvars`
+    *   `_PLAN_BUCKET`: The name of the GCS bucket you created (e.g., `avlab-gcp-tf-plans`).
+    *   `_BRANCH_NAME`: `${_BASE_BRANCH}` (This is a built-in variable from the trigger).
 
-1.  **Development**: Developers create feature branches off of the `development` branch. When they open a pull request against `development`, the appropriate stage-specific Cloud Build pipeline(s) will be triggered. The pipeline runs a `terraform plan` and posts the plan to the PR.
-2.  **Approval**: After the PR is reviewed and the plan is approved, the code is merged into the `development` branch.
-3.  **Deployment to Development**: The merge to the `development` branch triggers the corresponding "deploy-dev-*" Cloud Build trigger, which applies the Terraform configuration to the `development` environment.
-4.  **Promotion to Non-Production and Production**: To promote changes to the next environment, you will create a pull request from the `development` branch to the `non-production` branch, and then from `non-production` to `main`. The same review and approval process is followed at each stage.
+---
+
+### **Trigger 2: The "Apply" Trigger**
+
+*   **Name:** A descriptive name (e.g., `apply-dev-0-org-setup`).
+*   **Event:** "Push to a branch".
+*   **Source:**
+    *   **Repository:** Your `aviato-cloud-foundation-fabric` repository.
+    *   **Branch:** The name of the environment-specific branch (e.g., `^development$`).
+    *   **Included files filter (IMPORTANT):** To prevent all "apply" pipelines from running on every merge, add a path filter.
+        *   Example for `apply-dev-0-org-setup`: `fast/stages/0-org-setup/**`
+*   **Configuration:**
+    *   **Type:** "Cloud Build configuration file (yaml or json)".
+    *   **Location:** The path to the stage-specific `cloudbuild-apply.yaml` file (e.g., `fast/stages/0-org-setup/cloudbuild-apply.yaml`).
+*   **Substitution variables:**
+    *   `_PLAN_BUCKET`: The name of the GCS bucket you created (e.g., `avlab-gcp-tf-plans`).
+    *   `_BRANCH_NAME`: `${_BRANCH_NAME}` (This is a built-in variable from the trigger).
+
+---
+
+## Initial Bootstrap Sequence
+
+Due to dependencies, you must perform a one-time manual deployment of the stages in the correct order. For the very first deployment, you will need to trigger the **"apply" pipeline** for each stage manually from the Google Cloud Console, targeting your `development` branch.
+
+**Correct Bootstrap Order:**
+1.  `apply-dev-0-org-setup`
+2.  `apply-dev-0-secrets`
+3.  `apply-dev-1-vpcsc`
+4.  `apply-dev-2-networking`
+5.  `apply-dev-2-security`

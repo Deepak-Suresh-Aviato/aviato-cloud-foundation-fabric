@@ -1,0 +1,42 @@
+# This Cloud Build pipeline is triggered by a Pull Request.
+# It runs `terraform plan` and saves the plan artifact to a GCS bucket.
+# This pipeline is designed to be used with the corresponding `cloudbuild-apply.yaml`.
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+# 1. Initialize Terraform
+- name: 'hashicorp/terraform:latest'
+  id: 'Terraform init'
+  entrypoint: 'sh'
+  args: ['-c', 'terraform init']
+
+# 2. Statically analyze the configuration for syntax errors.
+- name: 'hashicorp/terraform:latest'
+  id: 'Terraform validate'
+  entrypoint: 'sh'
+  args: ['-c', 'terraform validate']
+  waitFor: ['Terraform init']
+
+# 3. Generate the Terraform plan and save it to a file.
+- name: 'hashicorp/terraform:latest'
+  id: 'Terraform plan'
+  entrypoint: 'sh'
+  args:
+  - '-c'
+  - |
+    terraform plan -var-file=${_TF_VARS_FILE} -out=${_BRANCH_NAME}_tfplan
+  waitFor: ['Terraform validate']
+
+# 4. Upload the plan file to a GCS bucket for the apply job.
+# The bucket name is passed in as a substitution variable.
+- name: 'gcr.io/cloud-builders/gsutil'
+  id: 'Upload plan to GCS'
+  args: ['cp', '${_BRANCH_NAME}_tfplan', 'gs://${_PLAN_BUCKET}/']
+
+# Substitution variables that should be defined in the Cloud Build trigger.
+substitutions:
+  _TF_VARS_FILE: 'gcp-development.tfvars' # Default, should be overridden
+  _PLAN_BUCKET: '' # Must be specified in the trigger
+  _BRANCH_NAME: 'development' # Default, should be overridden by the trigger

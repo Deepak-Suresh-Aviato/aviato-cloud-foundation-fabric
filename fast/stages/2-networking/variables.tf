@@ -14,53 +14,27 @@
  * limitations under the License.
  */
 
-variable "context" {
-  description = "Context-specific interpolations."
-  type = object({
-    custom_roles   = optional(map(string), {})
-    folder_ids     = optional(map(string), {})
-    iam_principals = optional(map(string), {})
-    locations      = optional(map(string), {})
-    project_ids    = optional(map(string), {})
-    tag_keys       = optional(map(string), {})
-    tag_values     = optional(map(string), {})
-  })
-  default  = {}
-  nullable = false
-}
-
 variable "factories_config" {
-  description = "Configuration for the resource factories or external data."
+  description = "Paths to data files."
   type = object({
-    defaults              = optional(string, "datasets/hub-and-spokes-peerings/defaults.yaml")
-    dns                   = optional(string, "datasets/hub-and-spokes-peerings/dns/zones")
-    dns-response-policies = optional(string, "datasets/hub-and-spokes-peerings/dns/response-policies")
-    firewall-policies     = optional(string, "datasets/hub-and-spokes-peerings/firewall-policies")
-    folders               = optional(string, "datasets/hub-and-spokes-peerings/folders")
-    ncc-hubs              = optional(string, "datasets/hub-and-spokes-peerings/ncc-hubs")
-    nvas                  = optional(string, "datasets/hub-and-spokes-peerings/nvas")
-    projects              = optional(string, "datasets/hub-and-spokes-peerings/projects")
-    vpcs                  = optional(string, "datasets/hub-and-spokes-peerings/vpcs")
+    networking = string
   })
-  nullable = false
-  default  = {}
 }
 
-variable "outputs_location" {
-  description = "Path where tfvars files for the following stages are written. Leave empty to disable."
+variable "context" {
+  description = "Context from previous stages."
+  type        = any
+  default     = {}
+}
+
+variable "azure_peer_ip_0" {
+  description = "The first IP address of the Azure VPN gateway."
   type        = string
-  default     = null
+  default     = "0.0.0.0"
 }
 
-variable "universe" {
-  # tfdoc:variable:source 0-org-setup
-  description = "GCP universe where to deploy projects. The prefix will be prepended to the project id."
-  type = object({
-    domain                         = string
-    prefix                         = string
-    forced_jit_service_identities  = optional(list(string), [])
-    unavailable_services           = optional(list(string), [])
-    unavailable_service_identities = optional(list(string), [])
-  })
-  default = null
+variable "azure_peer_ip_1" {
+  description = "The second IP address of the Azure VPN gateway."
+  type        = string
+  default     = "0.0.0.0"
 }
