@@ -88,3 +88,28 @@ Due to dependencies, you must perform a one-time manual deployment of the stages
 3.  `apply-dev-1-vpcsc`
 4.  `apply-dev-2-networking`
 5.  `apply-dev-2-security`
+
+---
+
+## Managing Inter-Stage Dependencies
+
+**IMPORTANT:** The FAST stages are not independent. Later stages depend on the outputs of earlier stages (e.g., the networking stage needs to know the folder IDs created by the org setup stage).
+
+If you make a change to an upstream stage (like `0-org-setup`), you **must** re-run the pipelines for all downstream stages that depend on it to keep your infrastructure in sync.
+
+### Recommended Workflow: The "Trivial Change" PR
+
+The safest way to manage these cascading changes is to make them all visible in a single Pull Request.
+
+**Scenario:** You need to change the name of a folder in `0-org-setup`. You know this will affect `2-networking` and `2-security`.
+
+1.  **Create your branch** as usual.
+2.  **Make your intended change** in the `fast/stages/0-org-setup/` directory.
+3.  **Make a trivial change** in the downstream directories. For example, add a comment to `fast/stages/2-networking/main.tf`:
+    ```tf
+    # Re-running to pick up changes from 0-org-setup
+    ```
+4.  **Commit and create the Pull Request.**
+
+**Result:**
+Because you have changed files in all three stage directories, the "plan" triggers for `0-org-setup`, `2-networking`, and `2-security` will all run on your PR. This allows you to see the full, cascading impact of your change in one place before you approve it. When you merge the PR, the corresponding "apply" pipelines will run, bringing everything into sync.
